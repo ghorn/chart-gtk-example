@@ -15,10 +15,47 @@ import Control.Lens ( (.~) )
 import Data.Default.Class ( def )
 import qualified Graphics.Rendering.Chart as Chart
 import Graphics.Rendering.Chart.Backend.Cairo ( runBackend, defaultEnv )
-
+import Graphics.UI.Gtk.ModelView as Model
+import qualified Data.Text as T
 
 animationWaitTime :: Int
 animationWaitTime = 33 -- i think this means 1/33 =~= 30.3 Hz
+
+type MyReal = Double
+
+k :: MyReal
+j :: MyReal
+q :: MyReal
+jp :: MyReal
+
+k = 1.03**(1/12)
+j = 1
+q = 1
+jp = j + q
+
+f :: Int -> MyReal
+f 0 = 1
+f i = (f $ i - 1) * k
+
+g :: Int -> MyReal
+g i = if (mod i 12 == 0) then (f i) else (g $ i - 1)
+
+h :: Int -> MyReal
+h 0 = 20
+h i = h 0 + (g $ i - 1) * j
+
+a :: Int -> MyReal
+a i = (f i) * jp + (h i)
+
+--not the safest way to print doubles
+tShowSome :: MyReal -> T.Text
+tShowSome = T.pack . take 6 . show
+
+data IFGHA = IFGHA {xi :: Int,
+                    xf :: MyReal,
+                    xg :: MyReal,
+                    xh :: MyReal,
+                    xa :: MyReal}
 
 main :: IO ()
 main = do
@@ -49,7 +86,7 @@ main = do
   -- use an MVar as an abstraction barrier
   -- for now just keep shifting the data in time
   plotData <- CC.newMVar $ unzip [(t, sin(t)) | t <- init [0,0.05..2*pi :: Double]]
-  let shiftData (xs,y0:ys) = (xs, ys ++ [y0])
+  let shiftData (xs,y0:ys) = (map (+0.05) xs, ys ++ [y0])
       shiftData _ = ([],[])
       dataUpdater = do
         CC.threadDelay 50000 -- 20Hz
@@ -68,10 +105,92 @@ main = do
   -- create the other widget, the main plotter
   plotArea <- newChartCanvas plotData
 
+  txtfield <- Gtk.entryNew
+  _ <- Gtk.onEntryActivate txtfield ((Gtk.entryGetText txtfield) >>= putStrLn)
+
+  -- the table itself
+  list <- listStoreNew [IFGHA i (f i) (g i) (h i) (a i) | i <- [0..30]]
+
+  treeview <- Model.treeViewNewWithModel list
+  Model.treeViewSetHeadersVisible treeview True
+
+  -- column for i
+  coli <- Model.treeViewColumnNew
+  Model.treeViewColumnSetTitle coli "i"
+  rendereri <- Model.cellRendererTextNew
+  Model.cellLayoutPackStart coli rendereri False
+  Model.cellLayoutSetAttributes coli rendereri list
+          $ \ind -> [Model.cellText := (T.pack . show $ (xi ind))]
+  _ <- Model.treeViewAppendColumn treeview coli
+
+  -- column for f
+  colf <- Model.treeViewColumnNew
+  Model.treeViewColumnSetTitle colf "f"
+  rendererf <- Model.cellRendererTextNew
+  Model.cellLayoutPackStart colf rendererf False
+  Model.cellLayoutSetAttributes colf rendererf list
+          $ \ind -> [Model.cellText := (tShowSome $ xf ind)]
+  _ <- Model.treeViewAppendColumn treeview colf
+
+-- column for g
+  colg <- Model.treeViewColumnNew
+  Model.treeViewColumnSetTitle colg "g"
+  rendererg <- Model.cellRendererTextNew
+  Model.cellLayoutPackStart colg rendererg False
+  Model.cellLayoutSetAttributes colg rendererg list
+          $ \ind -> [Model.cellText := (tShowSome $ xg ind)]
+  _ <- Model.treeViewAppendColumn treeview colg
+
+  -- column for h
+  colh <- Model.treeViewColumnNew
+  Model.treeViewColumnSetTitle colh "h"
+  rendererh <- Model.cellRendererTextNew
+  Model.cellLayoutPackStart colh rendererh False
+  Model.cellLayoutSetAttributes colh rendererh list
+          $ \ind -> [Model.cellText := (tShowSome $ xh ind)]
+  _ <- Model.treeViewAppendColumn treeview colh
+
+-- column for a
+  cola <- Model.treeViewColumnNew
+  Model.treeViewColumnSetTitle cola "a"
+  renderera <- Model.cellRendererTextNew
+  Model.cellLayoutPackStart cola renderera False
+  Model.cellLayoutSetAttributes cola renderera list
+          $ \ind -> [Model.cellText := (tShowSome $ xa ind)]
+  _ <- Model.treeViewAppendColumn treeview cola
+
+  ---- If only there were a way to select individual boxes instead of whole rows
+  --tree <- Model.treeViewGetSelection treeview
+  --Model.treeSelectionSetMode tree  SelectionSingle
+  --Model.onSelectionChanged tree $ do
+  --   sel <- Model.treeSelectionGetSelectedRows tree
+  --   let s = head  (head sel)
+  --   v <- Model.listStoreGetValue list s
+  --   --Model.treeViewColumnSetTitle coli v
+  --   putStrLn $ "selected row " ++ (show $ xi v)
+
+  hbox <- Gtk.hBoxNew False 4
+
+  vbox1 <- Gtk.vBoxNew False 4
+
+  Gtk.set vbox1 $
+    [ Gtk.containerChild := txtfield
+    , Gtk.boxChildPacking txtfield := Gtk.PackNatural
+    , Gtk.containerChild := treeview
+    , Gtk.boxChildPacking treeview := Gtk.PackNatural
+    ]
+
   -- create a box which will contain the message widget and plot widget
-  vbox <- Gtk.vBoxNew False 4
+  vbox2 <- Gtk.vBoxNew False 4
+
+  Gtk.set hbox $
+    [ Gtk.containerChild := vbox1
+    , Gtk.boxChildPacking vbox1 := Gtk.PackNatural
+    , Gtk.containerChild := vbox2
+    , Gtk.boxChildPacking vbox2 := Gtk.PackNatural
+    ]
   -- add the children
-  Gtk.set vbox $
+  Gtk.set vbox2 $
     [ Gtk.containerChild := msg
     , Gtk.boxChildPacking msg := Gtk.PackNatural
     , Gtk.containerChild := plotArea
@@ -80,7 +199,7 @@ main = do
 
   -- Set the child of the main window
   -- We have to use the vbox because the main window can only have 1 child
-  _ <- Gtk.set win [ Gtk.containerChild := vbox ]
+  _ <- Gtk.set win [ Gtk.containerChild := hbox ]
 
   -- show the main window and start the gtk loop
   Gtk.widgetShowAll win
