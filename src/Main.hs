@@ -15,7 +15,7 @@ import Control.Lens ( (.~) )
 import Data.Default.Class ( def )
 import qualified Graphics.Rendering.Chart as Chart
 import Graphics.Rendering.Chart.Backend.Cairo ( runBackend, defaultEnv )
-import Graphics.UI.Gtk.ModelView as Model
+import "gtk" Graphics.UI.Gtk.ModelView as Model
 import qualified Data.Text as T
 
 animationWaitTime :: Int
