@@ -23,29 +23,28 @@ animationWaitTime = 33 -- i think this means 1/33 =~= 30.3 Hz
 
 type MyReal = Double
 
-k :: MyReal
-j :: MyReal
-q :: MyReal
-jp :: MyReal
+mytable :: [IFGHA]
+mytable = [IFGHA i (f i) (g i) (h i) (a i) | i <- [0..30]]
+  where
+    k,j,q,jp :: MyReal
+    k = 1.03**(1/12)
+    j = 1
+    q = 1
+    jp = j + q
 
-k = 1.03**(1/12)
-j = 1
-q = 1
-jp = j + q
+    f :: Int -> MyReal
+    f 0 = 1
+    f i = (f $ i - 1) * k
 
-f :: Int -> MyReal
-f 0 = 1
-f i = (f $ i - 1) * k
+    g :: Int -> MyReal
+    g i = if (mod i 12 == 0) then (f i) else (g $ i - 1)
 
-g :: Int -> MyReal
-g i = if (mod i 12 == 0) then (f i) else (g $ i - 1)
+    h :: Int -> MyReal
+    h 0 = 20
+    h i = h 0 + (g $ i - 1) * j
 
-h :: Int -> MyReal
-h 0 = 20
-h i = h 0 + (g $ i - 1) * j
-
-a :: Int -> MyReal
-a i = (f i) * jp + (h i)
+    a :: Int -> MyReal
+    a i = (f i) * jp + (h i)
 
 --not the safest way to print doubles
 tShowSome :: MyReal -> T.Text
@@ -109,7 +108,7 @@ main = do
   _ <- Gtk.onEntryActivate txtfield ((Gtk.entryGetText txtfield) >>= putStrLn)
 
   -- the table itself
-  list <- listStoreNew [IFGHA i (f i) (g i) (h i) (a i) | i <- [0..30]]
+  list <- listStoreNew mytable
 
   treeview <- Model.treeViewNewWithModel list
   Model.treeViewSetHeadersVisible treeview True
