@@ -17,6 +17,7 @@ import qualified Graphics.Rendering.Chart as Chart
 import Graphics.Rendering.Chart.Backend.Cairo ( runBackend, defaultEnv )
 import "gtk" Graphics.UI.Gtk.ModelView as Model
 import qualified Data.Text as T
+import Text.Read ( readMaybe )
 
 animationWaitTime :: Int
 animationWaitTime = 33 -- i think this means 1/33 =~= 30.3 Hz
@@ -50,62 +51,47 @@ mytable = [IFGHA i (f i) (g i) (h i) (a i) | i <- [0..30]]
 tShowSome :: MyReal -> T.Text
 tShowSome = T.pack . take 6 . show
 
-data IFGHA = IFGHA {xi :: Int,
-                    xf :: MyReal,
-                    xg :: MyReal,
-                    xh :: MyReal,
-                    xa :: MyReal}
+data IFGHA = IFGHA { xi :: Int
+                   , xf :: MyReal
+                   , xg :: MyReal
+                   , xh :: MyReal
+                   , xa :: MyReal
+                   }
 
-main :: IO ()
-main = do
-  -- have to call this before any other gtk stuff
-  _ <- Gtk.initGUI
-
-  -- the main window
-  win <- Gtk.windowNew
-  _ <- Gtk.set win [ Gtk.containerBorderWidth := 8
-                   , Gtk.windowTitle := "wooooooooooo"
-                   ]
-
-  -- lets have a little fun, make a little label widget to display a message for us
-  msg <- Gtk.labelNew (Just "..... heeeeey macarena ..... lol ..... lol ..... lol ..... lol ")
-
-  -- a little worker to update the message
-  let msgUpdater = do
-        CC.threadDelay 200000 -- 1/5 second delay
-        -- have to call postGUISync because gtk is not thread-safe
-        Gtk.postGUISync $ do
-          (x0:xs) <- Gtk.labelGetText msg :: IO String
-          Gtk.labelSetText msg (xs ++ [x0])
-
-  -- fork that worker thread
-  msgThread <- CC.forkIO $ forever msgUpdater
-
-  -- a worker thread to update whatever will be plotted
-  -- use an MVar as an abstraction barrier
-  -- for now just keep shifting the data in time
-  plotData <- CC.newMVar $ unzip [(t, sin(t)) | t <- init [0,0.05..2*pi :: Double]]
-  let shiftData (xs,y0:ys) = (map (+0.05) xs, ys ++ [y0])
-      shiftData _ = ([],[])
-      dataUpdater = do
-        CC.threadDelay 50000 -- 20Hz
-        CC.modifyMVar_ plotData (return . shiftData)
-  -- fork the worker thread
-  plotDataThread <- CC.forkIO $ forever dataUpdater
-
-  -- When the window is destroyed, kill the message thread and quit Gtk.
-  -- I think this is only important in GHCI or other cases you want to
-  -- repeatedly start/stop the gui in a single process.
-  _ <- Gtk.onDestroy win $ do
-    CC.killThread msgThread
-    CC.killThread plotDataThread
-    Gtk.mainQuit
-
-  -- create the other widget, the main plotter
-  plotArea <- newChartCanvas plotData
-
+makeControlBox :: CC.MVar MyState -> IO Gtk.VBox
+makeControlBox ms = do
+  -- the text entry
+  entryBox <- Gtk.hBoxNew False 2
+  kLabel <- Gtk.labelNew (Just "k: ")
   txtfield <- Gtk.entryNew
-  _ <- Gtk.onEntryActivate txtfield ((Gtk.entryGetText txtfield) >>= putStrLn)
+  Gtk.boxPackStart entryBox kLabel Gtk.PackNatural 2
+  Gtk.boxPackStart entryBox txtfield Gtk.PackNatural 2
+  
+  k0 <- fmap msK (CC.readMVar ms)
+  Gtk.entrySetText txtfield (show k0)
+  _ <- txtfield `Gtk.on` Gtk.entryActivate $ do
+    txt <- Gtk.entryGetText txtfield
+    case readMaybe txt of
+      Nothing -> putStrLn $ show txt ++ " is not a valid MyReal"
+      Just k -> do
+        putStrLn $ "successfully read the value \"" ++ show k ++ "\""
+        CC.modifyMVar_ ms $ \ms0 -> return (ms0 {msK = k})
+
+  -- chose sin or tan
+  sinATanBox <- Gtk.hBoxNew True 2
+
+  -- Create a radio button with a Entry widget
+  radioSin <- Gtk.radioButtonNewWithLabel "sin(k * t)"
+  radioATan <- Gtk.radioButtonNewWithLabelFromWidget radioSin "atan(k * t)"
+
+  -- Pack them into a box, then show all the widgets
+  Gtk.boxPackStart sinATanBox radioSin Gtk.PackNatural 2
+  Gtk.boxPackStart sinATanBox radioATan Gtk.PackNatural 2
+
+  _ <- radioSin `Gtk.on` Gtk.toggled $ do
+    CC.modifyMVar_ ms $ \ms0 -> return (ms0 {msWhichPlot = Sin})
+  _ <- radioATan `Gtk.on` Gtk.toggled $ do
+    CC.modifyMVar_ ms $ \ms0 -> return (ms0 {msWhichPlot = ATan})
 
   -- the table itself
   list <- listStoreNew mytable
@@ -168,49 +154,118 @@ main = do
   --   --Model.treeViewColumnSetTitle coli v
   --   putStrLn $ "selected row " ++ (show $ xi v)
 
-  hbox <- Gtk.hBoxNew False 4
+  controlBox <- Gtk.vBoxNew False 4
 
-  vbox1 <- Gtk.vBoxNew False 4
-
-  Gtk.set vbox1 $
-    [ Gtk.containerChild := txtfield
-    , Gtk.boxChildPacking txtfield := Gtk.PackNatural
+  Gtk.set controlBox $
+    [ Gtk.containerChild := entryBox
+    , Gtk.boxChildPacking entryBox := Gtk.PackNatural
+    , Gtk.containerChild := sinATanBox
+    , Gtk.boxChildPacking sinATanBox := Gtk.PackNatural
     , Gtk.containerChild := treeview
     , Gtk.boxChildPacking treeview := Gtk.PackNatural
     ]
 
-  -- create a box which will contain the message widget and plot widget
-  vbox2 <- Gtk.vBoxNew False 4
+  return controlBox
 
+data WhichPlot = Sin | ATan
+
+data MyState =
+  MyState
+  { msWhichPlot :: WhichPlot
+  , msK :: MyReal
+  }
+
+main :: IO ()
+main = do
+  -- have to call this before any other gtk stuff
+  _ <- Gtk.initGUI
+
+  -- the main window
+  win <- Gtk.windowNew
+  _ <- Gtk.set win [ Gtk.containerBorderWidth := 8
+                   , Gtk.windowTitle := "wooooooooooo"
+                   ]
+
+  -- lets have a little fun, make a little label widget to display a message for us
+  msg <- Gtk.labelNew (Just "..... heeeeey macarena ..... lol ..... lol ..... lol ..... lol ")
+
+  -- a little worker to update the message
+  let msgUpdater = do
+        CC.threadDelay 200000 -- 1/5 second delay
+        -- have to call postGUISync because gtk is not thread-safe
+        Gtk.postGUISync $ do
+          (x0:xs) <- Gtk.labelGetText msg :: IO String
+          Gtk.labelSetText msg (xs ++ [x0])
+
+  -- fork that worker thread
+  msgThread <- CC.forkIO $ forever msgUpdater
+
+  -- a worker thread to update whatever will be plotted
+  -- use an MVar as an abstraction barrier
+  -- for now just keep shifting the data in time
+  plotData <- CC.newMVar $ [sin t | t <- init [0,0.05..2*pi :: MyReal]]
+  let shiftData (y0:ys) = ys ++ [y0]
+      shiftData [] = []
+      dataUpdater = do
+        CC.threadDelay 50000 -- 20Hz
+        CC.modifyMVar_ plotData (return . shiftData)
+  -- fork the worker thread
+  plotDataThread <- CC.forkIO $ forever dataUpdater
+
+  -- When the window is destroyed, kill the message thread and quit Gtk.
+  -- I think this is only important in GHCI or other cases you want to
+  -- repeatedly start/stop the gui in a single process.
+  _ <- Gtk.onDestroy win $ do
+    CC.killThread msgThread
+    CC.killThread plotDataThread
+    Gtk.mainQuit
+
+  -- the control box on the left
+  ms <- CC.newMVar MyState { msWhichPlot = Sin
+                           , msK = 1
+                           }
+  controlBox <- makeControlBox ms
+
+  -- create the other widget, the main plotter
+  plotArea <- newChartCanvas plotData ms
+
+
+  -- lay everythign out
+  hbox <- Gtk.hBoxNew False 4
   Gtk.set hbox $
-    [ Gtk.containerChild := vbox1
-    , Gtk.boxChildPacking vbox1 := Gtk.PackNatural
-    , Gtk.containerChild := vbox2
-    , Gtk.boxChildPacking vbox2 := Gtk.PackNatural
+    [ Gtk.containerChild := controlBox
+    , Gtk.boxChildPacking controlBox := Gtk.PackNatural
+    , Gtk.containerChild := plotArea
+    --, Gtk.boxChildPacking plotArea := Gtk.PackNatural
     ]
+
+
+  -- create a box which will contain the message widget and the rest
+  topVbox <- Gtk.vBoxNew False 4
+
   -- add the children
-  Gtk.set vbox2 $
+  Gtk.set topVbox $
     [ Gtk.containerChild := msg
     , Gtk.boxChildPacking msg := Gtk.PackNatural
-    , Gtk.containerChild := plotArea
-    , Gtk.boxChildPacking plotArea := Gtk.PackNatural
+    , Gtk.containerChild := hbox
+    --, Gtk.boxChildPacking hbox := Gtk.PackNatural
     ]
 
   -- Set the child of the main window
   -- We have to use the vbox because the main window can only have 1 child
-  _ <- Gtk.set win [ Gtk.containerChild := hbox ]
+  _ <- Gtk.set win [ Gtk.containerChild := topVbox ]
 
   -- show the main window and start the gtk loop
   Gtk.widgetShowAll win
   Gtk.mainGUI
 
-newChartCanvas :: (Chart.PlotValue a, Show a, RealFloat a)
-                  => CC.MVar ([a],[a]) -> IO Gtk.DrawingArea
-newChartCanvas plotData = do
+
+newChartCanvas :: CC.MVar [MyReal] -> CC.MVar MyState -> IO Gtk.DrawingArea
+newChartCanvas plotData ms = do
   -- chart drawing area
   chartCanvas <- Gtk.drawingAreaNew
   _ <- Gtk.widgetSetSizeRequest chartCanvas 250 250
-  _ <- Gtk.onExpose chartCanvas $ const (updateCanvas chartCanvas plotData)
+  _ <- Gtk.onExpose chartCanvas $ const (updateCanvas chartCanvas plotData ms)
   -- this is a delay which makes it periodically redraw
   _ <- Gtk.timeoutAddFull
        (Gtk.widgetQueueDraw chartCanvas >> return True)
@@ -219,12 +274,19 @@ newChartCanvas plotData = do
 
 
 -- this reads the data MVar and plots whatever is in it
-updateCanvas :: (Chart.PlotValue a, Show a, RealFloat a)
-                => Gtk.DrawingArea -> CC.MVar ([a],[a]) -> IO Bool
-updateCanvas canvas plotData = do
-  points <- CC.readMVar plotData
+updateCanvas :: Gtk.DrawingArea -> CC.MVar [MyReal] -> CC.MVar MyState -> IO Bool
+updateCanvas canvas plotData ms = do
+  ydisturbances <- CC.readMVar plotData
+  state <- CC.readMVar ms
 
-  let myGraph = displayChart (uncurry zip points)
+  let xaxis = [-4*pi,-3.99*pi..4*pi]
+      -- which function, sin or atan
+      k = msK state
+      f = case msWhichPlot state of
+        Sin  -> \x -> sin (k * x)
+        ATan -> \x -> atan (k * x)
+
+  let myGraph = displayChart (zipWith (\x ydisturbance -> (x, 0.1*ydisturbance + f x)) xaxis (cycle ydisturbances))
   chartGtkUpdateCanvas myGraph canvas
 
 
@@ -258,8 +320,6 @@ chartGtkUpdateCanvas chart canvas = do
     regio <- Gtk.regionRectangle $ Gtk.Rectangle 0 0 width height
     let sz = (fromIntegral width,fromIntegral height)
     Gtk.drawWindowBeginPaintRegion win regio
-    _ <- Gtk.renderWithDrawable win $ runBackend (defaultEnv Chart.bitmapAlignmentFns) (Chart.render chart sz) 
+    _ <- Gtk.renderWithDrawable win $ runBackend (defaultEnv Chart.bitmapAlignmentFns) (Chart.render chart sz)
     Gtk.drawWindowEndPaint win
     return True
-
-
