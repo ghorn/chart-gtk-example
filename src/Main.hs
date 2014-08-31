@@ -17,7 +17,6 @@ import qualified Graphics.Rendering.Chart as Chart
 import Graphics.Rendering.Chart.Backend.Cairo ( runBackend, defaultEnv )
 import "gtk" Graphics.UI.Gtk.ModelView as Model
 import qualified Data.Text as T
-import Text.Read ( readMaybe )
 
 animationWaitTime :: Int
 animationWaitTime = 33 -- i think this means 1/33 =~= 30.3 Hz
@@ -63,19 +62,15 @@ makeControlBox ms = do
   -- the text entry
   entryBox <- Gtk.hBoxNew False 2
   kLabel <- Gtk.labelNew (Just "k: ")
-  txtfield <- Gtk.entryNew
+  kField <- Gtk.spinButtonNewWithRange 0.1 2.0 0.02
   Gtk.boxPackStart entryBox kLabel Gtk.PackNatural 2
-  Gtk.boxPackStart entryBox txtfield Gtk.PackNatural 2
+  Gtk.boxPackStart entryBox kField Gtk.PackNatural 2
   
   k0 <- fmap msK (CC.readMVar ms)
-  Gtk.entrySetText txtfield (show k0)
-  _ <- txtfield `Gtk.on` Gtk.entryActivate $ do
-    txt <- Gtk.entryGetText txtfield
-    case readMaybe txt of
-      Nothing -> putStrLn $ show txt ++ " is not a valid MyReal"
-      Just k -> do
-        putStrLn $ "successfully read the value \"" ++ show k ++ "\""
-        CC.modifyMVar_ ms $ \ms0 -> return (ms0 {msK = k})
+  Gtk.spinButtonSetValue kField k0
+  _ <- Gtk.onValueSpinned kField $ do
+    k <- Gtk.spinButtonGetValue kField
+    CC.modifyMVar_ ms $ \ms0 -> return (ms0 {msK = k})
 
   -- chose sin or tan
   sinATanBox <- Gtk.hBoxNew True 2
