@@ -198,7 +198,7 @@ main = do
   -- a worker thread to update whatever will be plotted
   -- use an MVar as an abstraction barrier
   -- for now just keep shifting the data in time
-  plotData <- CC.newMVar $ [sin t | t <- init [0,0.05..2*pi :: MyReal]]
+  plotData <- CC.newMVar $ [sin t | t <- init [0,0.1..2*pi :: MyReal]]
   let shiftData (y0:ys) = ys ++ [y0]
       shiftData [] = []
       dataUpdater = do
